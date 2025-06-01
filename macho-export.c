@@ -471,15 +471,16 @@ void *macho_export_make(struct macho_export_symtab *symtab, uint32_t *size) {
 	//	printf("%s\n",*sym);
 	//}
 	mnode_load_symbol_entries(symtab,root,"");
-	void *output=malloc(mnode_get_max_size(root));
-	void *ptr=output;
+	//void *output=malloc(mnode_get_max_size(root));
 	uint32_t psz=mnode_preflight(root,0);
+	void *output=malloc(psz);
+	void *ptr=output;
 	//printf("Preflight size=%u\n",psz);
 	mnode_put(root,&ptr,output);
 	mnode_free(root);
 	free(root);
 	*size=psz;
-	return realloc(output,psz);
+	return output;
 	//*size=ptr-output;
 	//return realloc(output,ptr-output);
 }
