@@ -6,9 +6,7 @@
 
 struct macho_export_symtab *macho_export_create() {
 	struct macho_export_symtab *ret=malloc(sizeof(struct macho_export_symtab));
-	ret->symbols=malloc(16*sizeof(struct macho_export_symbol));
-	ret->cnt=0;
-	ret->alloc_cnt=16;
+	ret->symbols=NULL;
 }
 
 static inline uint64_t read_uleb128(void **ptr) {
@@ -82,23 +80,25 @@ struct macho_export_symtab *macho_export_read(void *data,size_t size) {
 }
 
 void macho_export_insert(struct macho_export_symtab *symtab,const char *name,uint32_t flags,uint32_t data,uint64_t data2) {
-	if(symtab->cnt==symtab->alloc_cnt) {
-		symtab->alloc_cnt*=2;
-		symtab->symbols=realloc(symtab->symbols,symtab->alloc_cnt*sizeof(struct macho_export_symbol));
-	}
-	struct macho_export_symbol *symbol=symtab->symbols+symtab->cnt;
-	symtab->cnt++;
 	size_t name_mem_len=strlen(name)+1;
-	char *name_copy=malloc(name_mem_len);
+	struct macho_export_symbol *symbol=malloc(sizeof(struct macho_export_symbol)+name_mem_len);
+	char *name_copy=(char*)(symbol+1);
 	memcpy(name_copy,name,name_mem_len);
 	symbol->symbol_name=name_copy;
 	symbol->flags=flags;
 	symbol->data=data;
 	symbol->data2=data2;
+	symbol->next=NULL;
+	for(struct macho_export_symbol **i=&symtab->symbols;;i=&((*i)->next)) {
+		if(!*i) {
+			*i=symbol;
+			return;
+		}
+	}
 }
 
 struct macho_export_symbol *macho_export_find(struct macho_export_symtab *symtab,const char *name) {
-	for(struct macho_export_symbol *i=symtab->symbols;i!=symtab->symbols+symtab->cnt;i++) {
+	for(struct macho_export_symbol *i=symtab->symbols;i;i=i->next) {
 		if(strcmp(i->symbol_name,name)==0)
 			return i;
 	}
@@ -106,14 +106,13 @@ struct macho_export_symbol *macho_export_find(struct macho_export_symtab *symtab
 }
 
 void macho_export_remove(struct macho_export_symtab *symtab, const char *symbol) {
-	for(int i=0;i!=symtab->cnt;i++) {
-		if(strcmp(symtab->symbols[i].symbol_name,symbol)==0) {
-			struct macho_export_symbol *v=symtab->symbols+i;
-			free((char*)v->symbol_name);
+	for(struct macho_export_symbol **i=&symtab->symbols;*i;i=&((*i)->next)) {
+		if(strcmp((*i)->symbol_name,symbol)==0) {
+			struct macho_export_symbol *v=*i;
+			//free((char*)v->symbol_name);
 			if(v->flags==EXPORT_SYMBOL_FLAGS_REEXPORT&&v->data2)
 				free((void*)v->data2);
-			memcpy(symtab->symbols+i,symtab->symbols+i+1,(symtab->cnt-i-1)*sizeof(struct macho_export_symbol));
-			symtab->cnt--;
+			*i=(*i)->next;
 			return;
 		}
 	}
@@ -218,8 +217,7 @@ static void _cut_symbol(char **symbols,char *symbol,struct mnode *node) {
 				}
 			}
 			for(char **v=csb;*v;v++) {
-				//printf("%s\n",*v);
-				if(!*v)
+				if(!*v||!**v)
 					continue;
 				_mnode_insert(cnode,*v,strlen(*v),0);
 			}
@@ -437,20 +435,25 @@ void mnode_load_symbol_entries(struct macho_export_symtab *symtab,struct mnode *
 
 void *macho_export_make(struct macho_export_symtab *symtab, uint32_t *size) {
 	uint32_t max_len=0;
-	for(struct macho_export_symbol *i=symtab->symbols;i!=symtab->symbols+symtab->cnt;i++) {
+	for(struct macho_export_symbol *i=symtab->symbols;i;i=i->next) {
 		max_len+=strlen(i->symbol_name)+16;
 		if(i->flags==EXPORT_SYMBOL_FLAGS_REEXPORT&&i->data2)
 			max_len+=strlen((char*)i->data2);
 	}
-	char **all_symbols=malloc(sizeof(char*)*(symtab->cnt+1));
-	for(int i=0;i<symtab->cnt;i++) {
-		all_symbols[i]=(char*)symtab->symbols[i].symbol_name;
+	uint32_t symcnt=0;
+	for(struct macho_export_symbol *i=symtab->symbols;i;i=i->next)
+		symcnt++;
+	char **all_symbols=malloc(sizeof(char*)*(symcnt+1));
+	symcnt=0;
+	for(struct macho_export_symbol *i=symtab->symbols;i;i=i->next) {
+		all_symbols[symcnt]=(char*)i->symbol_name;
+		symcnt++;
 	}
-	all_symbols[symtab->cnt]=NULL;
-	struct mnode *root=_mnode_insert(NULL,0,0,symtab->cnt);
+	all_symbols[symcnt]=NULL;
+	struct mnode *root=_mnode_insert(NULL,0,0,symcnt);
 	//printf("Invoking w symbol %s\n",all_symbols[0]);
 	//_cut_symbol(all_symbols,all_symbols[0],root);
-	int last_symcnt=symtab->cnt;
+	int last_symcnt=symcnt;
 	for(int i=0;i<last_symcnt;i++) {
 		//printf("Invoking w symbol %s\n",all_symbols[i]);
 		_cut_symbol(all_symbols,all_symbols[i],root);
@@ -486,11 +489,13 @@ void *macho_export_make(struct macho_export_symtab *symtab, uint32_t *size) {
 }
 
 void macho_export_free(struct macho_export_symtab *symtab) {
-	for(struct macho_export_symbol *i=symtab->symbols;i!=symtab->symbols+symtab->cnt;i++) {
-		free((char*)i->symbol_name);
+	for(struct macho_export_symbol *i=symtab->symbols;i;) {
+		//free((char*)i->symbol_name);
 		if(i->flags==EXPORT_SYMBOL_FLAGS_REEXPORT&&i->data2)
 			free((void*)i->data2);
+		void *dispose=i;
+		i=i->next;
+		free(dispose);
 	}
-	free(symtab->symbols);
 	free(symtab);
 }

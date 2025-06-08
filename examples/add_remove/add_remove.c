@@ -54,28 +54,27 @@ int main(int argc, char *argv[]) {
 	void *export_blob=file+exp_off;
 	printf("exp sz: %u\n",exp_sz);
 	struct macho_export_symtab *smt=macho_export_read(export_blob,exp_sz);
-	for(struct macho_export_symbol *i=smt->symbols;i!=smt->symbols+smt->cnt;i++) {
-		printf("%s: %p\n",i->symbol_name,(void*)(uint64_t)i->data);
+	for(struct macho_export_symbol **i=&smt->symbols;*i;) {
+		printf("%s: %p",(*i)->symbol_name,(void*)(uint64_t)(*i)->data);
+		if(strcmp((*i)->symbol_name,"_main")!=0&&strcmp((*i)->symbol_name,"__mh_execute_header")!=0) {
+			puts(" (removing)");
+			macho_export_remove(smt,(*i)->symbol_name);
+		}else{
+			puts("");
+			i=&((*i)->next);
+		}
 	}
 	uint32_t size;
-	macho_export_remove(smt,"_bi_make_section");
-	macho_export_remove(smt,"_bi_destroy_section");
-	macho_export_remove(smt,"_bi_node_change_content_value_float");
-	macho_export_remove(smt,"_bi_node_change_content_value");
-	macho_export_remove(smt,"_bi_node_load_float");
-	macho_export_remove(smt,"_bi_node_set_hidden");
-	macho_export_remove(smt,"_bi_node_ensure_string");
-	macho_export_remove(smt,"_bi_node_get_string");
-	macho_export_remove(smt,"_bi_node_free_string");
-	macho_export_remove(smt,"_bin_unit_strings");
-	macho_export_insert(smt,"lol",0,0x12341234,0);
 	void *data=macho_export_make(smt,&size);
 	printf("sz=%u\n",size);
 	/*struct macho_export_symtab *newsmt=macho_export_read(data,size);
-	for(struct macho_export_symbol *i=newsmt->symbols;i!=newsmt->symbols+newsmt->cnt;i++) {
-		printf("%s: %p\n",i->symbol_name,(void*)(uint64_t)i->data);
+	for(struct macho_export_symbol **i=&newsmt->symbols;*i;i=&((*i)->next)) {
+		printf("%s: %p\n",(*i)->symbol_name,(void*)(uint64_t)(*i)->data);
 	}
 	macho_export_free(newsmt);*/
+	int outdatafd=open("outdata",O_WRONLY|O_CREAT|O_TRUNC,0644);
+	write(outdatafd,data,size);
+	close(outdatafd);
 	if(size<=exp_sz) {
 		memcpy(export_blob,data,size);
 		int outfd=open("output",O_WRONLY|O_CREAT|O_TRUNC,0755);

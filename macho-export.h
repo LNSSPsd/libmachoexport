@@ -8,12 +8,13 @@ struct macho_export_symbol {
 	// if flags==EXPORT_SYMBOL_FLAGS_REEXPORT, data2 is char * to library name
 	// if flags==EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER, data2 is resolver offset
 	// otherwise data2 is ignored
+	struct macho_export_symbol *next;
 };
 
 struct macho_export_symtab {
 	struct macho_export_symbol *symbols;
-	uint32_t cnt;
-	uint32_t alloc_cnt;
+	//uint32_t cnt;
+	//uint32_t alloc_cnt;
 };
 
 struct macho_export_symtab *macho_export_create();
